@@ -1,3 +1,5 @@
+
+
 Documentation for Finite Element Analysis Python Script
 Overview
 
@@ -83,6 +85,33 @@ Usage
 
     Visualization and Analysis:
         The displacements can be used for further structural analysis or visualization. This script does not include visualization capabilities, so additional tools or libraries (e.g., matplotlib, mayavi) may be necessary for graphical representation.
+
+Example Usage
+
+db_name = "materials.db"
+create_materials_database(db_name)
+
+mesh_dimensions = (10.0, 5.0, 5.0)
+divisions = (10, 5, 5)
+nodes, elements = generate_tetrahedral_mesh(*mesh_dimensions, divisions)
+
+material_name = "Steel"
+element_properties = assign_material_properties(elements, db_name, material_name)
+
+constraints = {'x': 0, 'y': 'free', 'z': 'free'}
+node_constraints = apply_boundary_conditions(nodes, constraints)
+
+forces = {'Fx': 100, 'Fy': 0, 'Fz': 0}
+node_forces = apply_forces(nodes, forces)
+
+youngs_modulus = element_properties[0]['youngs_modulus']
+poisson_ratio = element_properties[0]['poisson_ratio']
+K = assemble_global_stiffness_matrix(np.array(elements), np.array(nodes), youngs_modulus, poisson_ratio)
+
+F = np.zeros(len(nodes) * 3)  # Initialize force vector
+# Populate F with forces from node_forces
+
+displacements = solve_for_displacements(K, F, node_constraints)
 
 
 Project Documentation: Finite Element Analysis (FEA) Simulator
@@ -201,3 +230,13 @@ Future Enhancements
     Incorporating non-linear material behavior.
     Enhancing visualization capabilities.
     Integrating more complex loading and boundary condition scenarios.
+
+Customization and Extensibility
+
+    The script can be extended to include more complex loading conditions, different element types, or non-linear material behavior.
+    Visualization and post-processing capabilities can be integrated for a more comprehensive FEA tool.
+
+Limitations
+
+    Currently limited to linear elastic materials and tetrahedral elements.
+    Boundary conditions and forces are simplified and need refinement for complex real-world scenarios.
