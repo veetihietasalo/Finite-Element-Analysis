@@ -1,3 +1,90 @@
+Documentation for Finite Element Analysis Python Script
+Overview
+
+This Python script is designed for Finite Element Analysis (FEA) in mechanical engineering. It includes functionality for creating a materials database, generating a tetrahedral mesh, assigning material properties, applying boundary conditions, applying forces, and solving for node displacements.
+Key Functions
+
+    create_materials_database(db_name: str)
+        Purpose: Creates a SQLite database for storing material properties.
+        Parameters:
+            db_name (str): Name of the database file.
+        Functionality:
+            Initializes a table for materials with columns for name, Young's modulus, and Poisson's ratio.
+            Inserts predefined materials (Steel, Aluminum, Concrete) into the database.
+
+    generate_tetrahedral_mesh(length: float, width: float, height: float, divisions: Tuple[int, int, int])
+        Purpose: Generates a 3D tetrahedral mesh.
+        Parameters:
+            length, width, height (float): Dimensions of the mesh.
+            divisions (Tuple[int, int, int]): Number of divisions along each axis (x, y, z).
+        Returns: A tuple of nodes (List[Tuple[float, float, float]]) and elements (List[Tuple[int, int, int, int]]).
+
+    assign_material_properties(elements: List[Tuple[int, int, int, int]], db_name: str, material_name: str)
+        Purpose: Assigns material properties to elements from the database.
+        Parameters:
+            elements: Tetrahedral elements.
+            db_name, material_name: Database name and material name for property lookup.
+        Returns: A list of dictionaries with 'youngs_modulus' and 'poisson_ratio' for each element.
+
+    apply_boundary_conditions(nodes: List[Tuple[float, float, float]], constraints: Dict[str, Union[float, str]])
+        Purpose: Applies boundary conditions to nodes.
+        Parameters:
+            nodes: List of node coordinates.
+            constraints: Dictionary of constraints with keys as 'x', 'y', 'z' and values either 'free' or a fixed value.
+        Returns: List of node-specific constraint dictionaries.
+
+    apply_forces(nodes: List[Tuple[float, float, float]], forces: Dict[str, float])
+        Purpose: Applies forces to nodes.
+        Parameters:
+            nodes: List of node coordinates.
+            forces: Dictionary of forces with keys as 'Fx', 'Fy', 'Fz' and their respective values.
+        Returns: List of node-specific force dictionaries.
+
+    compute_element_stiffness_matrix(element_coordinates: np.ndarray, youngs_modulus: float, poisson_ratio: float)
+        Purpose: Computes the stiffness matrix for a tetrahedral element.
+        Parameters:
+            element_coordinates: 4x3 array of the element's node coordinates.
+            youngs_modulus, poisson_ratio: Material properties.
+        Returns: 12x12 stiffness matrix (np.ndarray).
+
+    assemble_global_stiffness_matrix(elements: np.ndarray, nodes: np.ndarray, youngs_modulus: float, poisson_ratio: float)
+        Purpose: Assembles the global stiffness matrix.
+        Parameters:
+            elements, nodes: Tetrahedral elements and their node coordinates.
+            youngs_modulus, poisson_ratio: Material properties.
+        Returns: Global stiffness matrix (np.ndarray).
+
+    solve_for_displacements(K: np.ndarray, F: np.ndarray, constraints: List[Dict[str, Union[float, str]]])
+        Purpose: Solves for node displacements.
+        Parameters:
+            K: Global stiffness matrix.
+            F: Force vector.
+            constraints: List of boundary conditions for each node.
+        Returns: Displacement vector (np.ndarray).
+
+Usage
+
+    Setup and Initialization:
+        Install necessary Python libraries: numpy, sqlite3, and optionally scipy.
+        Define the database name and execute create_materials_database to initialize the materials database.
+        Specify the dimensions and divisions for the mesh, and use generate_tetrahedral_mesh to create the mesh.
+
+    Assigning Material Properties:
+        Call assign_material_properties with the generated elements, database name, and desired material name (e.g., 'Steel') to assign material properties to each element.
+
+    Applying Boundary Conditions and Forces:
+        Define a dictionary for boundary conditions (constraints) and another for forces (forces). The keys should correspond to the axes ('x', 'y', 'z' for constraints and 'Fx', 'Fy', 'Fz' for forces).
+        Use apply_boundary_conditions and apply_forces with the list of nodes to generate node-specific constraints and forces.
+
+    Computing Stiffness Matrices and Solving for Displacements:
+        Use compute_element_stiffness_matrix for individual elements if needed.
+        Assemble the global stiffness matrix using assemble_global_stiffness_matrix.
+        Solve for node displacements with solve_for_displacements, passing the global stiffness matrix, force vector, and constraints.
+
+    Visualization and Analysis:
+        The displacements can be used for further structural analysis or visualization. This script does not include visualization capabilities, so additional tools or libraries (e.g., matplotlib, mayavi) may be necessary for graphical representation.
+
+
 Project Documentation: Finite Element Analysis (FEA) Simulator
 Overview
 
