@@ -1,10 +1,12 @@
 
 
-Documentation for Finite Element Analysis Python Script
-Overview
+# Documentation for Finite Element Analysis Python Script
 
-This Python script is designed for Finite Element Analysis (FEA) in mechanical engineering. It includes functionality for creating a materials database, generating a tetrahedral mesh, assigning material properties, applying boundary conditions, applying forces, and solving for node displacements.
-Key Functions
+# Overview
+
+**This Python script is designed for Finite Element Analysis (FEA) in mechanical engineering. It includes functionality for creating a materials database, generating a tetrahedral mesh, assigning material properties, applying boundary conditions, applying forces, and solving for node displacements.**
+
+## Key Functions:
 
     create_materials_database(db_name: str)
         Purpose: Creates a SQLite database for storing material properties.
@@ -64,7 +66,7 @@ Key Functions
             constraints: List of boundary conditions for each node.
         Returns: Displacement vector (np.ndarray).
 
-Usage
+## Usage
 
     Setup and Initialization:
         Install necessary Python libraries: numpy, sqlite3, and optionally scipy.
@@ -86,7 +88,7 @@ Usage
     Visualization and Analysis:
         The displacements can be used for further structural analysis or visualization. This script does not include visualization capabilities, so additional tools or libraries (e.g., matplotlib, mayavi) may be necessary for graphical representation.
 
-Example Usage
+## Example Usage
 
 db_name = "materials.db"
 create_materials_database(db_name)
@@ -113,19 +115,20 @@ F = np.zeros(len(nodes) * 3)  # Initialize force vector
 
 displacements = solve_for_displacements(K, F, node_constraints)
 
+# Project Documentation: Finite Element Analysis (FEA) Simulator
 
-Project Documentation: Finite Element Analysis (FEA) Simulator
-Overview
+## Overview
 
-This project provides a Python-based Finite Element Analysis (FEA) simulator for mechanical engineering applications. It focuses on tetrahedral mesh generation, material property assignment, stiffness matrix computation, and structural deformation under applied forces.
-Dependencies
+**This project provides a Python-based Finite Element Analysis (FEA) simulator for mechanical engineering applications. It focuses on tetrahedral mesh generation, material property assignment, stiffness matrix computation, and structural deformation under applied forces.**
+
+# Dependencies
 
     Python 3.x
     numpy: For numerical operations
     sqlite3: For material property database management
     mayavi: For 3D visualization
 
-Key Components
+# Key Components
 
     Material Database Creation (create_materials_database):
         Purpose: To create a SQLite database for storing material properties.
@@ -202,7 +205,7 @@ Key Components
         Returns:
             B matrix (numpy.ndarray).
 
-Main Execution
+# Main Execution
 
 The main code block initializes the material database, generates the tetrahedral mesh, assigns material properties, computes the global stiffness matrix, and solves for node displacements. It also uses mayavi for 3D visualization of the deformed structure.
 Usage
@@ -216,27 +219,27 @@ Usage
         Adjust mesh dimensions and divisions for different structures.
         Alter applied forces and boundary conditions as per requirement.
 
-Visualization
+# Visualization
 
-The mayavi package is used to visualize the deformed structure in 3D. It shows the initial and displaced positions of the nodes, giving a clear representation of how the structure responds to the applied forces.
-Limitations and Considerations
+**The mayavi package is used to visualize the deformed structure in 3D. It shows the initial and displaced positions of the nodes, giving a clear representation of how the structure responds to the applied forces.
+Limitations and Considerations**
 
     The current implementation assumes linear elastic materials.
     Boundary conditions and forces are simplified for demonstration purposes and need to be adapted for real-world scenarios.
     The visualization is basic and may need enhancements for more complex structures.
 
-Future Enhancements
+# Future Enhancements
 
     Incorporating non-linear material behavior.
     Enhancing visualization capabilities.
     Integrating more complex loading and boundary condition scenarios.
 
-Customization and Extensibility
+# Customization and Extensibility
 
     The script can be extended to include more complex loading conditions, different element types, or non-linear material behavior.
     Visualization and post-processing capabilities can be integrated for a more comprehensive FEA tool.
 
-Limitations
+# Limitations
 
     Currently limited to linear elastic materials and tetrahedral elements.
     Boundary conditions and forces are simplified and need refinement for complex real-world scenarios.
