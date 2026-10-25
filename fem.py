@@ -215,6 +215,26 @@ def build_force_vector(node_forces: List[Dict[str, float]]) -> np.ndarray:
     return F
 
 
+def traction_force_vector(nodes, elements, node_ids: Iterable[int], traction) -> np.ndarray:
+    """Consistent nodal forces (length 3N) for a uniform traction on part of the surface.
+
+    The loaded surface is every boundary triangle whose 3 nodes are all in `node_ids`.
+    Each triangle passes traction * area / 3 to each of its nodes (the consistent load
+    for linear elements). `traction` is force per area as (tx, ty, tz).
+    """
+    nodes = np.asarray(nodes, dtype=float)
+    selected = set(int(i) for i in node_ids)
+    t = np.asarray(traction, dtype=float)
+    F = np.zeros(3 * len(nodes))
+    for face in boundary_faces(elements):
+        if all(n in selected for n in face):
+            p0, p1, p2 = nodes[list(face)]
+            area = 0.5 * np.linalg.norm(np.cross(p1 - p0, p2 - p0))
+            for n in face:
+                F[3 * n:3 * n + 3] += t * area / 3.0
+    return F
+
+
 def solve_for_displacements(K: np.ndarray, F: np.ndarray,
                             constraints: List[Dict[str, Union[float, str]]]) -> np.ndarray:
     """Solve K u = F with prescribed displacements.
@@ -251,6 +271,29 @@ def solve_for_displacements(K: np.ndarray, F: np.ndarray,
 def calculate_stress(strain, E, nu):
     """Stress vector D @ strain for an isotropic linear elastic material."""
     return elasticity_matrix(E, nu) @ np.asarray(strain, dtype=float)
+
+
+def compute_element_stresses(elements, nodes, displacements, youngs_modulus: float,
+                             poisson_ratio: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Strain B u_e and stress D (B u_e) in every element (constant per element for linear tets).
+
+    Returns (strains, stresses), both of shape (number of elements, 6).
+    """
+    nodes = np.asarray(nodes, dtype=float)
+    u = np.asarray(displacements, dtype=float)
+    strains = np.zeros((len(elements), 6))
+    for e, element in enumerate(elements):
+        element = list(element)
+        strains[e] = compute_B_matrix(nodes[element]) @ u[element_dofs(element)]
+    stresses = strains @ elasticity_matrix(youngs_modulus, poisson_ratio).T
+    return strains, stresses
+
+
+def von_mises(stress) -> np.ndarray:
+    """Von Mises stress of one stress vector or of rows of stress vectors."""
+    s = np.asarray(stress, dtype=float)
+    sx, sy, sz, txy, tyz, txz = np.moveaxis(s, -1, 0)
+    return np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (txy ** 2 + tyz ** 2 + txz ** 2))
 
 
 def plot_mesh(nodes, elements, displacements=None, scale: float = 1.0):

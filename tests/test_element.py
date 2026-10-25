@@ -121,3 +121,10 @@ def test_element_strain_energy_matches_continuum(X):
     K_e = fem.compute_element_stiffness_matrix(X, E, NU)
     assert np.isclose(0.5 * u @ K_e @ u, 0.5 * V * eps @ fem.elasticity_matrix(E, NU) @ eps, rtol=1e-12)
 
+
+def test_von_mises():
+    assert np.isclose(fem.von_mises([100.0, 0, 0, 0, 0, 0]), 100.0)
+    assert np.isclose(fem.von_mises([0, 0, 0, 50.0, 0, 0]), np.sqrt(3) * 50.0)
+    assert np.isclose(fem.von_mises([-30.0, -30.0, -30.0, 0, 0, 0]), 0.0)
+    rows = fem.von_mises(np.array([[100.0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 50.0]]))
+    assert np.allclose(rows, [100.0, np.sqrt(3) * 50.0])

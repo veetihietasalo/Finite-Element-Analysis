@@ -1,4 +1,4 @@
-"""Assembled-model checks: rigid body modes, boundary conditions, prescribed displacements."""
+"""Assembled-model checks: rigid body modes, prescribed displacements, patch test, bar, cantilever."""
 import numpy as np
 import pytest
 
@@ -97,3 +97,143 @@ def test_solver_does_not_change_inputs_and_rejects_bad_values():
     with pytest.raises(ValueError):
         fem.solve_for_displacements(K, F, cons)
 
+
+@pytest.mark.parametrize("amount", [0.0, 0.15])
+def test_patch_test_linear_field_is_exact(amount):
+    """Prescribe u = a + G x on the surface nodes; interior nodes, strain and stress must be exact."""
+    P, elements, on_surface = perturbed_box_mesh(2.0, 1.5, 1.0, (4, 3, 3), amount, seed=5)
+    rng = np.random.default_rng(6)
+    G = rng.normal(size=(3, 3)) * 1e-3
+    a = rng.normal(size=3) * 1e-3
+    exact = a + P @ G.T
+
+    cons = free_constraints(len(P))
+    for i in np.flatnonzero(on_surface):
+        cons[i] = {'x': exact[i, 0], 'y': exact[i, 1], 'z': exact[i, 2]}
+    K = fem.assemble_global_stiffness_matrix(elements, P, E, NU)
+    u = fem.solve_for_displacements(K, np.zeros(3 * len(P)), cons)
+
+    assert np.sum(~on_surface) > 0
+    assert np.allclose(u.reshape(-1, 3), exact, rtol=0, atol=1e-14)
+
+    strains, stresses = fem.compute_element_stresses(elements, P, u, E, NU)
+    eps = np.array([G[0, 0], G[1, 1], G[2, 2], G[0, 1] + G[1, 0], G[1, 2] + G[2, 1], G[0, 2] + G[2, 0]])
+    sigma = fem.elasticity_matrix(E, NU) @ eps
+    assert np.allclose(strains, eps, rtol=0, atol=1e-12)
+    assert np.allclose(stresses, sigma, rtol=0, atol=1e-6)
+
+
+def bar_constraints(P, length):
+    """Symmetry planes x = 0, y = 0, z = 0: the bar can stretch and contract freely."""
+    cons = free_constraints(len(P))
+    for axis, name in enumerate('xyz'):
+        for i in np.flatnonzero(np.isclose(P[:, axis], 0)):
+            cons[i][name] = 0.0
+    return cons
+
+
+def test_bar_under_end_load_matches_FL_over_EA():
+    length, width, height, load = 10.0, 1.0, 1.5, 1000.0
+    area = width * height
+    nodes, elements = fem.generate_tetrahedral_mesh(length, width, height, (10, 2, 3))
+    P = np.array(nodes)
+    tip = np.flatnonzero(np.isclose(P[:, 0], length))
+    cons = bar_constraints(P, length)
+    F = fem.traction_force_vector(nodes, elements, tip, (load / area, 0.0, 0.0))
+    assert np.isclose(F[0::3].sum(), load) and np.allclose(F[1::3], 0) and np.allclose(F[2::3], 0)
+
+    K = fem.assemble_global_stiffness_matrix(elements, nodes, E, NU)
+    u = fem.solve_for_displacements(K, F, cons).reshape(-1, 3)
+
+    sigma = load / area
+    exact = np.column_stack([sigma / E * P[:, 0], -NU * sigma / E * P[:, 1], -NU * sigma / E * P[:, 2]])
+    assert np.allclose(u, exact, rtol=0, atol=1e-12 * np.abs(exact).max())
+    assert np.allclose(u[tip, 0], load * length / (E * area), rtol=1e-10)
+
+    _, stresses = fem.compute_element_stresses(elements, nodes, u.ravel(), E, NU)
+    assert np.allclose(stresses[:, 0], sigma, rtol=1e-10)
+    assert np.allclose(stresses[:, 1:], 0, atol=1e-10 * sigma)
+
+    reactions = K @ u.ravel() - F
+    root = np.flatnonzero(np.isclose(P[:, 0], 0))
+    assert np.isclose(reactions[3 * root].sum(), -load, rtol=1e-10)
+
+
+def test_bar_with_prescribed_end_displacement():
+    length, width, height, delta = 10.0, 1.0, 1.5, 0.02
+    area = width * height
+    nodes, elements = fem.generate_tetrahedral_mesh(length, width, height, (10, 2, 3))
+    P = np.array(nodes)
+    tip = np.flatnonzero(np.isclose(P[:, 0], length))
+    cons = bar_constraints(P, length)
+    for i in tip:
+        cons[i]['x'] = delta
+
+    K = fem.assemble_global_stiffness_matrix(elements, nodes, E, NU)
+    u = fem.solve_for_displacements(K, np.zeros(3 * len(P)), cons).reshape(-1, 3)
+    strain = delta / length
+    assert np.allclose(u[:, 0], strain * P[:, 0], rtol=0, atol=1e-14)
+    assert np.allclose(u[:, 1], -NU * strain * P[:, 1], rtol=0, atol=1e-14)
+
+    reactions = K @ u.ravel()
+    assert np.isclose(reactions[3 * tip].sum(), E * area * strain, rtol=1e-10)
+    _, stresses = fem.compute_element_stresses(elements, nodes, u.ravel(), E, NU)
+    assert np.allclose(stresses[:, 0], E * strain, rtol=1e-10)
+
+
+CANTILEVER_MESHES = [(10, 1, 1), (20, 2, 2), (40, 4, 4)]
+
+
+def cantilever(divisions, length=10.0, width=1.0, height=1.0, load=1.0):
+    """Clamped at x = 0, tip load down as a uniform shear traction on the end face."""
+    nodes, elements = fem.generate_tetrahedral_mesh(length, width, height, divisions)
+    P = np.array(nodes)
+    clamped = np.flatnonzero(np.isclose(P[:, 0], 0))
+    tip = np.flatnonzero(np.isclose(P[:, 0], length))
+    cons = fem.apply_boundary_conditions(nodes, {'x': 0.0, 'y': 0.0, 'z': 0.0}, clamped)
+    F = fem.traction_force_vector(nodes, elements, tip, (0.0, 0.0, -load / (width * height)))
+    K = fem.assemble_global_stiffness_matrix(elements, nodes, E, NU)
+    u = fem.solve_for_displacements(K, F, cons)
+    deflection = (F @ u) / load
+    inertia = width * height ** 3 / 12
+    euler_bernoulli = load * length ** 3 / (3 * E * inertia)
+    timoshenko = euler_bernoulli + load * length / ((5 / 6) * E / (2 * (1 + NU)) * width * height)
+    reactions = K @ u - F
+    tip_mean = u.reshape(-1, 3)[tip].mean(axis=0)
+    return deflection, timoshenko, reactions[3 * clamped + 2].sum(), tip_mean
+
+
+@pytest.fixture(scope="module")
+def cantilever_results():
+    return {div: cantilever(div) for div in CANTILEVER_MESHES}
+
+
+def test_cantilever_equilibrium(cantilever_results):
+    for _, _, reaction_z, _ in cantilever_results.values():
+        assert np.isclose(reaction_z, 1.0, rtol=1e-8)
+
+
+def test_cantilever_tip_deflection_converges_from_below(cantilever_results):
+    """Linear tets are too stiff in bending, so the tolerance is wide on purpose.
+
+    FE / Timoshenko measured 0.219, 0.504, 0.787 at 10x1x1, 20x2x2, 40x4x4 cells
+    (0.887 at 60x6x6, left out here since the dense K takes about 2 GB). The test asks
+    for a deflection that grows with the mesh, stays below theory and is at least 0.75
+    of it at 40x4x4.
+    """
+    ratios = [d / t for d, t, _, _ in (cantilever_results[div] for div in CANTILEVER_MESHES)]
+    assert all(r1 < r2 for r1, r2 in zip(ratios, ratios[1:]))
+    assert ratios[-1] < 1.0
+    assert ratios[-1] > 0.75
+
+
+def test_cantilever_sideways_displacement_shrinks_with_mesh(cantilever_results):
+    """The same split in every cell isn't mirror symmetric, so a z load also moves the tip in y.
+
+    Measured u_y / u_z at the tip: -0.27, -0.17, -0.07 at 10x1x1, 20x2x2, 40x4x4
+    (-0.035 at 60x6x6, -0.010 at 120x12x12 with a sparse solve outside the tests).
+    It is mesh bias, so it has to shrink as the mesh gets finer.
+    """
+    side = [abs(u[1] / u[2]) for _, _, _, u in (cantilever_results[div] for div in CANTILEVER_MESHES)]
+    assert all(s1 > s2 for s1, s2 in zip(side, side[1:]))
+    assert side[-1] < 0.1
