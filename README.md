@@ -1,6 +1,6 @@
 # Finite-Element-Analysis
 
-A small linear elastic finite element solver in Python, a personal project from January 2024. It meshes a box into tetrahedra, reads material properties from SQLite, assembles a global stiffness matrix and solves K u = F with NumPy. It is not finished: the element stiffness matrix is still wrong, so the displacements it gives are not physical.
+A small linear elastic finite element solver in Python, an old math-inspired side project from January 2024. It meshes a box into tetrahedra, reads material properties from SQLite, assembles a global stiffness matrix and solves K u = F with NumPy. It was left unfinished: the element stiffness matrix is wrong, so the displacements it gives are not physical.
 
 What works:
 
@@ -140,6 +140,6 @@ displacements = solve_for_displacements(K, F, node_constraints)
 
 ## Status
 
-Personal project, still in development going by the repo description. The code was committed on 2024-01-16 and the README updated on 2024-01-29, no commits since.
+Old side project, not being worked on. The code was committed on 2024-01-16 and the README updated on 2024-01-29, no commits since.
 
-Next up is the element stiffness matrix and the missing tetrahedron. The original README also planned non-linear materials, better visualization and more load and boundary condition cases.
+Left open: the element stiffness matrix and the missing tetrahedron. The original README also planned non-linear materials, better visualization and more load and boundary condition cases.
