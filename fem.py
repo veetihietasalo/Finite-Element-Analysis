@@ -49,53 +49,33 @@ def assign_material_properties(elements: List[Tuple[int, int, int, int]], db_nam
     return [{'youngs_modulus': youngs_modulus, 'poisson_ratio': poisson_ratio} for _ in elements]
 
 
-def generate_tetrahedral_mesh(
-    length: float, 
-    width: float, 
-    height: float, 
-    divisions: Tuple[int, int, int]
-) -> Tuple[List[Tuple[float, float, float]], List[Tuple[int, int, int, int]]]:
-    """
-    Generate a 3D tetrahedral mesh based on the given parameters.
+def generate_tetrahedral_mesh(length: float, width: float, height: float, divisions: Tuple[int, int, int]
+                              ) -> Tuple[List[Tuple[float, float, float]], List[Tuple[int, int, int, int]]]:
+    """Mesh the box [0, length] x [0, width] x [0, height] into tetrahedra.
 
-    Parameters:
-    - length: Length of the cuboid in which the tetrahedra fit.
-    - width: Width of the cuboid in which the tetrahedra fit.
-    - height: Height of the cuboid in which the tetrahedra fit.
-    - divisions: Number of divisions along each axis (x, y, z).
+    Nodes sit on a regular grid with `divisions` = (nx, ny, nz) cells. Each cell is
+    split into 6 tetrahedra around its main diagonal n0-n7, one for every path from
+    n0 to n7 along the cell edges. Every cell uses the same split, so the face
+    diagonals of neighbouring cells match and the mesh is conforming. All elements
+    have positive volume with the node order used here.
 
-    Returns:
-    - nodes: List of nodes (x, y, z).
-    - elements: List of tetrahedral elements. Each element is defined by 4 node indices.
+    Returns (nodes, elements): nodes as (x, y, z) tuples, elements as 4-tuples of node indices.
     """
-    
-    # Initialize lists to store nodes and elements
+    nx, ny, nz = divisions
+    dx, dy, dz = length / nx, width / ny, height / nz
+
     nodes = []
+    node_map = {}
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            for k in range(nz + 1):
+                node_map[(i, j, k)] = len(nodes)
+                nodes.append((i * dx, j * dy, k * dz))
+
     elements = []
-    
-    # Calculate the step size for each division
-    dx = length / divisions[0]
-    dy = width / divisions[1]
-    dz = height / divisions[2]
-    
-    # Generate nodes
-    node_id = 0
-    node_map = {}  # Mapping from (i, j, k) to node_id
-    for i in range(divisions[0] + 1):
-        for j in range(divisions[1] + 1):
-            for k in range(divisions[2] + 1):
-                x = i * dx
-                y = j * dy
-                z = k * dz
-                nodes.append((x, y, z))
-                node_map[(i, j, k)] = node_id
-                node_id += 1
-    
-    # Generate tetrahedral elements
-    for i in range(divisions[0]):
-        for j in range(divisions[1]):
-            for k in range(divisions[2]):
-                # Node indices for the corner points of the current cube
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
                 n0 = node_map[(i, j, k)]
                 n1 = node_map[(i + 1, j, k)]
                 n2 = node_map[(i, j + 1, k)]
@@ -104,41 +84,30 @@ def generate_tetrahedral_mesh(
                 n5 = node_map[(i + 1, j, k + 1)]
                 n6 = node_map[(i, j + 1, k + 1)]
                 n7 = node_map[(i + 1, j + 1, k + 1)]
-                
-                # Generate 5 tetrahedra that fill the cube
-                elements.append((n0, n1, n3, n7))
-                elements.append((n0, n3, n2, n7))
-                elements.append((n0, n2, n6, n7))
-                elements.append((n0, n6, n4, n7))
-                elements.append((n0, n4, n5, n7))
-                
+                elements.append((n0, n1, n3, n7))  # x, y, z
+                elements.append((n0, n3, n2, n7))  # y, x, z
+                elements.append((n0, n2, n6, n7))  # y, z, x
+                elements.append((n0, n6, n4, n7))  # z, y, x
+                elements.append((n0, n4, n5, n7))  # z, x, y
+                elements.append((n0, n5, n1, n7))  # x, z, y
+
     return nodes, elements
-
-
-def extract_triangles_from_tetrahedra(elements: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int]]:
-    triangles = []
-    for tet in elements:
-        triangles.append((tet[0], tet[1], tet[2]))
-        triangles.append((tet[0], tet[1], tet[3]))
-        triangles.append((tet[0], tet[2], tet[3]))
-        triangles.append((tet[1], tet[2], tet[3]))
-    return triangles
-
-
-def extract_unique_triangles_from_tetrahedra(elements: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int]]:
-    triangle_set = set()
-    for tet in elements:
-        triangle_set.add(tuple(sorted([tet[0], tet[1], tet[2]])))
-        triangle_set.add(tuple(sorted([tet[0], tet[1], tet[3]])))
-        triangle_set.add(tuple(sorted([tet[0], tet[2], tet[3]])))
-        triangle_set.add(tuple(sorted([tet[1], tet[2], tet[3]])))
-    return list(triangle_set)
 
 
 def tetrahedron_volume(element_coordinates: np.ndarray) -> float:
     """Signed volume of a tetrahedron from its 4 x 3 node coordinates (positive for the mesh's node order)."""
     X = np.asarray(element_coordinates, dtype=float)
     return float(np.linalg.det(X[1:] - X[0])) / 6.0
+
+
+def boundary_faces(elements: Iterable[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int]]:
+    """Triangles that belong to exactly one element, i.e. the outer surface of the mesh."""
+    count: Dict[Tuple[int, ...], int] = {}
+    for a, b, c, d in elements:
+        for face in ((a, b, c), (a, b, d), (a, c, d), (b, c, d)):
+            key = tuple(sorted(face))
+            count[key] = count.get(key, 0) + 1
+    return [face for face, n in count.items() if n == 1]
 
 
 def compute_B_matrix(element_coordinates: np.ndarray) -> np.ndarray:
@@ -314,7 +283,7 @@ def calculate_stress(strain, E, nu):
 
 
 def plot_mesh(nodes, elements, displacements=None, scale: float = 1.0):
-    """Draw the (deformed) mesh as a mayavi wireframe, coloured by |u|.
+    """Draw the outer surface of the (deformed) mesh as a mayavi wireframe, coloured by |u|.
 
     mayavi is imported here, so the rest of the module works without it.
     """
@@ -323,7 +292,7 @@ def plot_mesh(nodes, elements, displacements=None, scale: float = 1.0):
     nodes = np.asarray(nodes, dtype=float)
     u = np.zeros_like(nodes) if displacements is None else np.asarray(displacements, dtype=float).reshape(-1, 3)
     deformed = nodes + scale * u
-    mlab.triangular_mesh(deformed[:, 0], deformed[:, 1], deformed[:, 2], extract_unique_triangles_from_tetrahedra(elements),
+    mlab.triangular_mesh(deformed[:, 0], deformed[:, 1], deformed[:, 2], boundary_faces(elements),
                          scalars=np.linalg.norm(u, axis=1), representation="wireframe", line_width=1.0)
     mlab.show()
 
