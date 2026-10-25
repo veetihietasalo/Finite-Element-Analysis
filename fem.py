@@ -7,7 +7,7 @@ stresses in MPa.
 Strain and stress vectors use the order xx, yy, zz, xy, yz, xz, with
 engineering shear strains (gamma_xy = du/dy + dv/dx).
 
-Run `python fem.py` for the demo, `python fem.py --plot` to also
+Run `python fem.py` for the cantilever demo, `python fem.py --plot` to also
 draw the deformed mesh with mayavi.
 """
 
@@ -312,43 +312,47 @@ def plot_mesh(nodes, elements, displacements=None, scale: float = 1.0):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Steel box 10 x 1 x 1, node 0 fixed, no load.")
+    parser = argparse.ArgumentParser(description="Steel cantilever under a tip load.")
     parser.add_argument("--plot", action="store_true", help="draw the deformed mesh with mayavi")
+    parser.add_argument("--divisions", type=int, nargs=3, default=(40, 4, 4), metavar=("NX", "NY", "NZ"))
     args = parser.parse_args()
 
     db_name = 'materials.db'
     create_materials_database(db_name)
+
+    # 10 x 1 x 1 mm steel beam, clamped at x = 0, 1 N down at x = 10 (as a uniform shear traction on the end face)
     length, width, height = 10.0, 1.0, 1.0
-    divisions = (2, 1, 1)
-    nodes, elements = generate_tetrahedral_mesh(length, width, height, divisions)
-    element_properties = assign_material_properties(elements, db_name, 'Steel')
-    youngs_modulus = element_properties[0]['youngs_modulus']
-    poisson_ratio = element_properties[0]['poisson_ratio']
+    load = 1.0
+    nodes, elements = generate_tetrahedral_mesh(length, width, height, tuple(args.divisions))
+    props = assign_material_properties(elements, db_name, 'Steel')
+    E, nu = props[0]['youngs_modulus'], props[0]['poisson_ratio']
 
-    # Constrain the first node in all directions, keep the remaining nodes free to move
-    boundary_conditions = [{'x': 0, 'y': 0, 'z': 0}]
-    boundary_conditions += [{'x': 'free', 'y': 'free', 'z': 'free'} for _ in range(len(nodes) - 1)]
+    P = np.array(nodes)
+    clamped = np.flatnonzero(np.isclose(P[:, 0], 0.0))
+    tip = np.flatnonzero(np.isclose(P[:, 0], length))
+    constraints = apply_boundary_conditions(nodes, {'x': 0.0, 'y': 0.0, 'z': 0.0}, clamped)
+    F = traction_force_vector(nodes, elements, tip, (0.0, 0.0, -load / (width * height)))
 
-    # Applied forces for each node (in Newton), 0 means no force in that direction
-    applied_forces = [{'Fx': 0, 'Fy': 0, 'Fz': 0} for _ in range(len(nodes))]
+    K = assemble_global_stiffness_matrix(elements, nodes, E, nu)
+    u = solve_for_displacements(K, F, constraints)
+    _, stresses = compute_element_stresses(elements, nodes, u, E, nu)
 
-    K = assemble_global_stiffness_matrix(np.array(elements), np.array(nodes), youngs_modulus, poisson_ratio)
-    F = np.zeros(3 * len(nodes))
-    for i, force in enumerate(applied_forces):
-        F[3 * i] = force['Fx']
-        F[3 * i + 1] = force['Fy']
-        F[3 * i + 2] = force['Fz']
+    # downward deflection as the load-weighted mean of -u_z over the end face (F @ u / load)
+    tip_deflection = (F @ u) / load
+    I = width * height ** 3 / 12
+    euler_bernoulli = load * length ** 3 / (3 * E * I)
+    timoshenko = euler_bernoulli + load * length / ((5 / 6) * E / (2 * (1 + nu)) * width * height)
 
-    displacements = solve_for_displacements(K, F, boundary_conditions)
-
-    print(nodes)
-    print("Global Stiffness Matrix:")
-    print(K)
-    print("Node Displacements:")
-    print(displacements)
+    print(f"mesh {args.divisions[0]} x {args.divisions[1]} x {args.divisions[2]} cells, "
+          f"{len(nodes)} nodes, {len(elements)} tetrahedra, {3 * len(nodes)} dof")
+    print(f"tip deflection   {tip_deflection:.6e} mm")
+    print(f"Euler-Bernoulli  {euler_bernoulli:.6e} mm  (FE / theory {tip_deflection / euler_bernoulli:.3f})")
+    print(f"Timoshenko       {timoshenko:.6e} mm  (FE / theory {tip_deflection / timoshenko:.3f})")
+    print(f"max |sigma_xx|   {np.abs(stresses[:, 0]).max():.2f} MPa")
+    print(f"max von Mises    {von_mises(stresses).max():.2f} MPa")
 
     if args.plot:
-        plot_mesh(nodes, elements, displacements)
+        plot_mesh(nodes, elements, u, scale=0.2 * length / max(np.abs(u).max(), 1e-30))
 
 
 if __name__ == "__main__":
