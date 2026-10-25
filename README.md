@@ -11,7 +11,7 @@ What works:
 
 What's missing or wrong:
 
-- `compute_element_stiffness_matrix` uses node coordinates where it needs shape function derivatives, has the wrong diagonal in the material matrix and an extra factor 6. `compute_B_matrix` has the right derivatives (with the sign flipped) but isn't used yet.
+- `compute_element_stiffness_matrix` uses node coordinates where it needs shape function derivatives, has the wrong diagonal in the material matrix and an extra factor 6. `compute_B_matrix` has the right derivatives (with the sign flipped) but isn't used.
 - The mesh leaves out 1 of the 6 tetrahedra per cell, so it covers 5/6 of the box.
 - `apply_boundary_conditions` fixes an axis to the node's own coordinate, not to the value passed in.
 - `solve_for_displacements` handles only zero prescribed displacements correctly.
@@ -79,13 +79,13 @@ In `generate_mesh.py` and `generate_calculate.py`. Copies the force dict (keys `
 
 ### `compute_element_stiffness_matrix(element_coordinates: np.ndarray, youngs_modulus: float, poisson_ratio: float)`
 
-In all three files. Takes the 4 x 3 node coordinates of one tetrahedron and returns a symmetric 12 x 12 matrix. The volume V is computed correctly. The rest isn't right yet:
+In all three files. Takes the 4 x 3 node coordinates of one tetrahedron and returns a symmetric 12 x 12 matrix. The volume V is computed correctly. The rest isn't right:
 
 - The B matrix is filled with the raw node coordinates instead of the shape function derivatives.
 - The material matrix has the bulk modulus K on the diagonal where isotropic elasticity needs K + 4G/3. The off-diagonal K - 2G/3 and the shear terms G are right.
 - The result is scaled by 6V instead of V.
 
-A rigid translation should give zero nodal forces. For a unit tetrahedron with steel values, a unit translation in x gives forces with a norm of about 2.9e5. The code still has the comment "Replace with actual computation".
+A rigid translation should give zero nodal forces. For a unit tetrahedron with steel values, a unit translation in x gives forces with a norm of about 2.9e5. The code has the comment "Replace with actual computation".
 
 ### `assemble_global_stiffness_matrix(elements: np.ndarray, nodes: np.ndarray, youngs_modulus: float, poisson_ratio: float)`
 
@@ -101,11 +101,11 @@ The column of a constrained degree of freedom is zeroed without moving its value
 
 ### `calculate_stress(strain, E, nu)`
 
-In `generate_model.py`. Multiplies a 6-component strain vector (3 normal strains, then 3 engineering shear strains) by the isotropic linear elastic matrix (C11, C12, C44) and returns the stress vector. Nothing calls it yet.
+In `generate_model.py`. Multiplies a 6-component strain vector (3 normal strains, then 3 engineering shear strains) by the isotropic linear elastic matrix (C11, C12, C44) and returns the stress vector. Nothing calls it.
 
 ### `compute_B_matrix(tetrahedron_nodes)`
 
-In `generate_model.py`. Computes the 6 x 12 strain-displacement matrix of a linear tetrahedron from its 4 node coordinates, with strains in the order xx, yy, zz, xy, yz, xz. Raises `ValueError` for a zero-volume element. Checked against a linear displacement field, it gives the exact strains with the sign flipped. Nothing calls it yet.
+In `generate_model.py`. Computes the 6 x 12 strain-displacement matrix of a linear tetrahedron from its 4 node coordinates, with strains in the order xx, yy, zz, xy, yz, xz. Raises `ValueError` for a zero-volume element. Checked against a linear displacement field, it gives the exact strains with the sign flipped. Nothing calls it.
 
 ## Example
 
