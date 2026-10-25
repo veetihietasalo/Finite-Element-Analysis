@@ -13,9 +13,11 @@ draw the deformed mesh with mayavi.
 
 import argparse
 import sqlite3
-from typing import Dict, Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
+
+AXES = {'x': 0, 'y': 1, 'z': 2}
 
 
 def create_materials_database(db_name: str):
@@ -180,101 +182,70 @@ def assemble_global_stiffness_matrix(elements, nodes, youngs_modulus: float, poi
     return K
 
 
-def apply_boundary_conditions(
-    nodes: List[Tuple[float, float, float]], 
-    constraints: Dict[str, Union[float, str]]
-) -> List[Dict[str, Union[float, str]]]:
+def apply_boundary_conditions(nodes: List[Tuple[float, float, float]],
+                              constraints: Dict[str, Union[float, str]],
+                              node_ids: Optional[Iterable[int]] = None) -> List[Dict[str, Union[float, str]]]:
+    """One constraint dict per node for `solve_for_displacements`.
+
+    `constraints` maps 'x', 'y', 'z' to 'free' or a prescribed displacement. It is applied
+    to the nodes in `node_ids` (all nodes if None); the other nodes are left free.
     """
-    Apply boundary conditions to the nodes.
+    for axis in constraints:
+        if axis not in AXES:
+            raise ValueError(f"Unknown axis {axis!r}, use 'x', 'y' or 'z'.")
+    selected = set(range(len(nodes))) if node_ids is None else set(int(i) for i in node_ids)
+    free = {'x': 'free', 'y': 'free', 'z': 'free'}
+    return [dict(free, **constraints) if i in selected else dict(free) for i in range(len(nodes))]
 
-    Parameters:
-    - nodes: List of nodes (x, y, z).
-    - constraints: Dictionary defining the boundary conditions. 
-                   Keys can be 'x', 'y', 'z', and values can be either a fixed value or 'free'.
 
-    Returns:
-    - List of dictionaries representing the boundary conditions for each node.
+def apply_forces(nodes: List[Tuple[float, float, float]], forces: Dict[str, float],
+                 node_ids: Optional[Iterable[int]] = None) -> List[Dict[str, float]]:
+    """One {'Fx', 'Fy', 'Fz'} dict per node: `forces` on the nodes in `node_ids` (all if None), zero elsewhere."""
+    selected = set(range(len(nodes))) if node_ids is None else set(int(i) for i in node_ids)
+    loaded = {key: float(forces.get(key, 0.0)) for key in ('Fx', 'Fy', 'Fz')}
+    zero = {'Fx': 0.0, 'Fy': 0.0, 'Fz': 0.0}
+    return [dict(loaded) if i in selected else dict(zero) for i in range(len(nodes))]
+
+
+def build_force_vector(node_forces: List[Dict[str, float]]) -> np.ndarray:
+    """Global force vector F (length 3N) from per-node force dicts."""
+    F = np.zeros(3 * len(node_forces))
+    for i, force in enumerate(node_forces):
+        F[3 * i:3 * i + 3] = [force.get('Fx', 0.0), force.get('Fy', 0.0), force.get('Fz', 0.0)]
+    return F
+
+
+def solve_for_displacements(K: np.ndarray, F: np.ndarray,
+                            constraints: List[Dict[str, Union[float, str]]]) -> np.ndarray:
+    """Solve K u = F with prescribed displacements.
+
+    `constraints` has one dict per node mapping 'x', 'y', 'z' to 'free' or a prescribed
+    value. With c the constrained and f the free degrees of freedom:
+        u_c = prescribed values
+        K_ff u_f = F_f - K_fc u_c
+    K and F are not changed. Returns the full displacement vector (length 3N).
     """
-    
-    node_constraints = []
-    
-    for node in nodes:
-        x, y, z = node
-        constraint = {}
-        
-        for axis, value in constraints.items():
-            if axis == 'x':
-                constraint['x'] = value if value == 'free' else x
-            elif axis == 'y':
-                constraint['y'] = value if value == 'free' else y
-            elif axis == 'z':
-                constraint['z'] = value if value == 'free' else z
-                
-        node_constraints.append(constraint)
-        
-    return node_constraints
-
-
-def apply_forces(
-    nodes: List[Tuple[float, float, float]], 
-    forces: Dict[str, float]
-) -> List[Dict[str, float]]:
-    """
-    Apply forces to the nodes.
-
-    Parameters:
-    - nodes: List of nodes (x, y, z).
-    - forces: Dictionary defining the forces applied. Keys can be 'Fx', 'Fy', 'Fz'.
-
-    Returns:
-    - List of dictionaries representing the forces applied to each node.
-    """
-    
-    node_forces = []
-    
-    for node in nodes:
-        force = {}
-        
-        for axis, value in forces.items():
-            if axis in ['Fx', 'Fy', 'Fz']:
-                force[axis] = value
-                
-        node_forces.append(force)
-        
-    return node_forces
-
-
-def solve_for_displacements(K: np.ndarray, F: np.ndarray, constraints: List[Dict[str, Union[float, str]]]) -> np.ndarray:
-    """
-    Solve for node displacements based on the global stiffness matrix, applied forces, and constraints.
-
-    Parameters:
-    - K: Global stiffness matrix.
-    - F: Force vector.
-    - constraints: List of boundary condition dictionaries for each node.
-
-    Returns:
-    - Displacement vector.
-    """
-
-    # Apply constraints to the stiffness matrix and force vector
+    K = np.asarray(K, dtype=float)
+    F = np.asarray(F, dtype=float)
+    n = K.shape[0]
+    prescribed = {}
     for i, constraint in enumerate(constraints):
         for axis, value in constraint.items():
-            if value != 'free':
-                index = 3 * i + {'x': 0, 'y': 1, 'z': 2}[axis]
-                K[index, :] = 0
-                K[:, index] = 0
-                K[index, index] = 1
-                F[index] = value
+            if isinstance(value, str):
+                if value != 'free':
+                    raise ValueError(f"Constraint value must be 'free' or a number, got {value!r}.")
+                continue
+            if axis not in AXES:
+                raise ValueError(f"Unknown axis {axis!r}, use 'x', 'y' or 'z'.")
+            prescribed[3 * i + AXES[axis]] = float(value)
 
-    # Solve the system of equations to find the displacements
-    # If you can use scipy, uncomment the following line
-    # displacements = scipy.linalg.solve(K, F)
-    
-    # If you can't use scipy, you can use numpy's solver
-    displacements = np.linalg.solve(K, F)
-
-    return displacements
+    c = np.array(sorted(prescribed), dtype=int)
+    f = np.setdiff1d(np.arange(n), c)
+    u = np.zeros(n)
+    u[c] = [prescribed[i] for i in c]
+    rhs = F[f] - K[np.ix_(f, c)] @ u[c]
+    u[f] = np.linalg.solve(K[np.ix_(f, f)], rhs)
+    return u
 
 
 def calculate_stress(strain, E, nu):
