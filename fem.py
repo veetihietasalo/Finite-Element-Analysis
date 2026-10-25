@@ -135,108 +135,62 @@ def extract_unique_triangles_from_tetrahedra(elements: List[Tuple[int, int, int,
     return list(triangle_set)
 
 
-def compute_B_matrix(tetrahedron_nodes):
-    # Node coordinates
-    x1, y1, z1 = tetrahedron_nodes[0]
-    x2, y2, z2 = tetrahedron_nodes[1]
-    x3, y3, z3 = tetrahedron_nodes[2]
-    x4, y4, z4 = tetrahedron_nodes[3]
+def tetrahedron_volume(element_coordinates: np.ndarray) -> float:
+    """Signed volume of a tetrahedron from its 4 x 3 node coordinates (positive for the mesh's node order)."""
+    X = np.asarray(element_coordinates, dtype=float)
+    return float(np.linalg.det(X[1:] - X[0])) / 6.0
 
-    # Volume of the tetrahedron
-    V = (1/6) * np.linalg.det([
-        [1, x1, y1, z1],
-        [1, x2, y2, z2],
-        [1, x3, y3, z3],
-        [1, x4, y4, z4]
-    ])
 
-    # Check for non-zero volume
-    if V == 0:
+def compute_B_matrix(element_coordinates: np.ndarray) -> np.ndarray:
+    """6 x 12 strain-displacement matrix of a linear tetrahedron.
+
+    The shape functions are N_i = a_i + b_i x + c_i y + d_i z with N_i(node j) = 1 if
+    i == j else 0. Their coefficients are the columns of inv(A), where row j of A is
+    [1, x_j, y_j, z_j], so the derivatives (b_i, c_i, d_i) are rows 1..3 of inv(A).
+    B @ u_e gives [e_xx, e_yy, e_zz, g_xy, g_yz, g_xz] for the element's 12 nodal
+    displacements u_e = [u1, v1, w1, ..., u4, v4, w4].
+    """
+    X = np.asarray(element_coordinates, dtype=float)
+    scale = np.ptp(X, axis=0).max()
+    if abs(tetrahedron_volume(X)) <= 1e-12 * scale ** 3:
         raise ValueError("The tetrahedron has zero volume, check the node positions.")
 
-    # Compute derivatives of shape functions
-    b = [(y2*z3 - y3*z2 - y2*z4 + y4*z2 + y3*z4 - y4*z3) / (6*V),
-         (y3*z1 - y1*z3 - y3*z4 + y4*z3 + y1*z4 - y4*z1) / (6*V),
-         (y1*z2 - y2*z1 - y1*z4 + y4*z1 + y2*z4 - y4*z2) / (6*V),
-         (y2*z1 - y1*z2 - y2*z3 + y3*z2 + y1*z3 - y3*z1) / (6*V)]
+    A = np.hstack([np.ones((4, 1)), X])
+    b, c, d = np.linalg.inv(A)[1:]
 
-    c = [(x3*z2 - x2*z3 - x3*z4 + x4*z3 + x2*z4 - x4*z2) / (6*V),
-         (x1*z3 - x3*z1 - x1*z4 + x4*z1 + x3*z4 - x4*z3) / (6*V),
-         (x2*z1 - x1*z2 - x2*z4 + x4*z2 + x1*z4 - x4*z1) / (6*V),
-         (x2*z3 - x3*z2 - x2*z1 + x1*z2 + x3*z1 - x1*z3) / (6*V)]
-
-    d = [(x2*y3 - x3*y2 - x2*y4 + x4*y2 + x3*y4 - x4*y3) / (6*V),
-         (x3*y1 - x1*y3 - x3*y4 + x4*y3 + x1*y4 - x4*y1) / (6*V),
-         (x1*y2 - x2*y1 - x1*y4 + x4*y1 + x2*y4 - x4*y2) / (6*V),
-         (x3*y2 - x2*y3 - x3*y1 + x1*y3 + x2*y1 - x1*y2) / (6*V)]
-
-    # Assemble the B matrix
     B = np.zeros((6, 12))
     for i in range(4):
-        B[0, i*3] = b[i]
-        B[1, i*3+1] = c[i]
-        B[2, i*3+2] = d[i]
-        B[3, i*3] = c[i]
-        B[3, i*3+1] = b[i]
-        B[4, i*3+1] = d[i]
-        B[4, i*3+2] = c[i]
-        B[5, i*3] = d[i]
-        B[5, i*3+2] = b[i]
-
+        B[0, 3 * i] = b[i]
+        B[1, 3 * i + 1] = c[i]
+        B[2, 3 * i + 2] = d[i]
+        B[3, 3 * i], B[3, 3 * i + 1] = c[i], b[i]
+        B[4, 3 * i + 1], B[4, 3 * i + 2] = d[i], c[i]
+        B[5, 3 * i], B[5, 3 * i + 2] = d[i], b[i]
     return B
 
 
-def compute_element_stiffness_matrix(
-    element_coordinates: np.ndarray, 
-    youngs_modulus: float, 
-    poisson_ratio: float
-) -> np.ndarray:
+def elasticity_matrix(youngs_modulus: float, poisson_ratio: float) -> np.ndarray:
+    """6 x 6 isotropic linear elastic matrix D (stress = D @ strain).
+
+    Diagonal lambda + 2 mu (= K + 4G/3), off-diagonal lambda (= K - 2G/3), shear mu (= G).
     """
-    Compute the stiffness matrix for a tetrahedral element.
+    E, nu = youngs_modulus, poisson_ratio
+    lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+    mu = E / (2 * (1 + nu))
+    D = np.zeros((6, 6))
+    D[:3, :3] = lam
+    D[[0, 1, 2], [0, 1, 2]] += 2 * mu
+    D[[3, 4, 5], [3, 4, 5]] = mu
+    return D
 
-    Parameters:
-    - element_coordinates: 4x3 array containing the x, y, z coordinates of the element's nodes.
-    - youngs_modulus: Young's modulus of the material.
-    - poisson_ratio: Poisson's ratio of the material.
 
-    Returns:
-    - 12x12 stiffness matrix for the tetrahedral element.
-    """
-    
-    # Compute the element volume (V)
-    v1 = element_coordinates[1, :] - element_coordinates[0, :]
-    v2 = element_coordinates[2, :] - element_coordinates[0, :]
-    v3 = element_coordinates[3, :] - element_coordinates[0, :]
-    V = np.abs(np.dot(v1, np.cross(v2, v3))) / 6.0
-
-    # Construct the B matrix (strain-displacement matrix)
-    b = np.zeros((6, 12))
-    for i in range(4):
-        xi, yi, zi = element_coordinates[i, :]
-        b[0, i * 3] = xi
-        b[1, i * 3 + 1] = yi
-        b[2, i * 3 + 2] = zi
-        b[3, i * 3:i * 3 + 3] = [yi, xi, 0]
-        b[4, i * 3:i * 3 + 3] = [0, zi, yi]
-        b[5, i * 3:i * 3 + 3] = [zi, 0, xi]
-    b /= (6.0 * V)
-
-    # Construct the D matrix (material matrix)
-    G = youngs_modulus / (2 * (1 + poisson_ratio))
-    K = youngs_modulus / (3 * (1 - 2 * poisson_ratio))
-    D = np.array([
-        [K, K - 2 * G / 3, K - 2 * G / 3, 0, 0, 0],
-        [K - 2 * G / 3, K, K - 2 * G / 3, 0, 0, 0],
-        [K - 2 * G / 3, K - 2 * G / 3, K, 0, 0, 0],
-        [0, 0, 0, G, 0, 0],
-        [0, 0, 0, 0, G, 0],
-        [0, 0, 0, 0, 0, G]
-    ])
-
-    # Compute the element stiffness matrix (K_e)
-    K_e = np.dot(b.T, np.dot(D, b)) * V * 6
-
-    return K_e
+def compute_element_stiffness_matrix(element_coordinates: np.ndarray, youngs_modulus: float,
+                                     poisson_ratio: float) -> np.ndarray:
+    """12 x 12 stiffness matrix K_e = V * B^T D B of a linear tetrahedron."""
+    B = compute_B_matrix(element_coordinates)
+    D = elasticity_matrix(youngs_modulus, poisson_ratio)
+    V = abs(tetrahedron_volume(element_coordinates))
+    return V * B.T @ D @ B
 
 
 def element_dofs(element: Iterable[int]) -> np.ndarray:
@@ -355,35 +309,8 @@ def solve_for_displacements(K: np.ndarray, F: np.ndarray, constraints: List[Dict
 
 
 def calculate_stress(strain, E, nu):
-    """
-    Calculate the stress for a given strain using the material properties.
-    Args:
-    - strain (array): The strain vector.
-    - E (float): Young's modulus.
-    - nu (float): Poisson's ratio.
-    
-    Returns:
-    - stress (array): The stress vector.
-    """
-    # Calculate stiffness matrix components
-    C11 = E * (1 - nu) / ((1 + nu) * (1 - 2 * nu))
-    C12 = E * nu / ((1 + nu) * (1 - 2 * nu))
-    C44 = E / (2 * (1 + nu))
-    
-    # Stiffness matrix
-    C = np.array([
-        [C11, C12, C12, 0, 0, 0],
-        [C12, C11, C12, 0, 0, 0],
-        [C12, C12, C11, 0, 0, 0],
-        [0, 0, 0, C44, 0, 0],
-        [0, 0, 0, 0, C44, 0],
-        [0, 0, 0, 0, 0, C44]
-    ])
-    
-    # Compute stress
-    stress = np.dot(C, strain)
-    
-    return stress
+    """Stress vector D @ strain for an isotropic linear elastic material."""
+    return elasticity_matrix(E, nu) @ np.asarray(strain, dtype=float)
 
 
 def plot_mesh(nodes, elements, displacements=None, scale: float = 1.0):
