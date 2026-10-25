@@ -1,0 +1,5 @@
+numpy==2.5.4
+pytest==9.1.1
+
+# optional, only for `python fem.py --plot`:
+# mayavi
